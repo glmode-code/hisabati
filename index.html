@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1f4e79">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="حساباتي">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<title>حساباتي</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+/* Layout: one narrow ledger column. Balance first, then quick entry, then category bars, then the month's entries. */
+:root {
+  --bg: #f1f5f6;
+  --surface: #ffffff;
+  --fg: #14232b;
+  --muted: #5b6e77;
+  --line: #d8e2e6;
+  --accent: #1f4e79;
+  --accent-fg: #ffffff;
+  --in: #0b7a5f;
+  --out: #b83a28;
+  --in-bg: #dff1ea;
+  --out-bg: #f8e4df;
+  --font: 'IBM Plex Sans Arabic', system-ui, 'Segoe UI', Tahoma, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1a20; --surface: #172830; --fg: #e8eff2; --muted: #93a6ae; --line: #27404b;
+    --accent: #7db3e6; --accent-fg: #0f1a20; --in: #4cc9a4; --out: #f08a78;
+    --in-bg: #12342c; --out-bg: #3b1e19; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1a20; --surface: #172830; --fg: #e8eff2; --muted: #93a6ae; --line: #27404b;
+  --accent: #7db3e6; --accent-fg: #0f1a20; --in: #4cc9a4; --out: #f08a78;
+  --in-bg: #12342c; --out-bg: #3b1e19; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--font); font-size: 15px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 40px;
+}
+.wrap { max-width: 560px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+h1, h2, p { margin: 0; }
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.num { font-variant-numeric: tabular-nums; }
+
+.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: 0; }
+.months { display: flex; align-items: center; gap: 8px; }
+.months span { min-width: 7.5em; text-align: center; font-weight: 600; }
+.ghost {
+  min-height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+.summary .label { color: var(--muted); font-size: .85rem; }
+.balance { font-size: 2.1rem; font-weight: 700; line-height: 1.3; margin-top: 2px; }
+.balance.neg { color: var(--out); }
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+.split > div { min-width: 0; padding: 10px 12px; border-radius: 10px; }
+.split .in { background: var(--in-bg); }
+.split .out { background: var(--out-bg); }
+.split span { display: block; font-size: .8rem; color: var(--muted); }
+.split b { font-size: 1.05rem; overflow-wrap: anywhere; }
+.split .in b { color: var(--in); }
+.split .out b { color: var(--out); }
+.meter { height: 8px; border-radius: 99px; background: var(--line); overflow: hidden; margin-top: 16px; }
+.meter i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 99px; }
+.meter i.over { background: var(--out); }
+.hint { margin-top: 8px; font-size: .82rem; color: var(--muted); }
+
+h2 { font-size: 1.05rem; font-weight: 600; margin-bottom: 12px; }
+form { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+form .full { grid-column: 1 / -1; }
+.field { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: .82rem; color: var(--muted); }
+.field input, .field select {
+  min-height: 44px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--bg); color: var(--fg); font-size: 1rem; width: 100%; min-width: 0;
+}
+.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 4px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); }
+.seg label { position: relative; }
+.seg input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+.seg span { display: flex; align-items: center; justify-content: center; min-height: 40px; border-radius: 9px; font-weight: 600; color: var(--muted); }
+.seg input:checked + span { background: var(--surface); color: var(--fg); box-shadow: 0 0 0 1px var(--line); }
+.seg input[value="expense"]:checked + span { color: var(--out); }
+.seg input[value="income"]:checked + span { color: var(--in); }
+.seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.primary {
+  min-height: 46px; border: 0; border-radius: 10px; background: var(--accent); color: var(--accent-fg);
+  font-weight: 600; font-size: 1rem;
+}
+.err { color: var(--out); font-size: .85rem; min-height: 1.2em; }
+
+.bars { display: flex; flex-direction: column; gap: 12px; }
+.bar .row { display: flex; justify-content: space-between; gap: 8px; font-size: .9rem; }
+.bar .row span:last-child { color: var(--muted); }
+.bar .track { height: 6px; border-radius: 99px; background: var(--line); margin-top: 4px; overflow: hidden; }
+.bar .track i { display: block; height: 100%; background: var(--out); border-radius: 99px; }
+
+.list { display: flex; flex-direction: column; }
+.item { display: grid; grid-template-columns: 3.2em 1fr auto auto; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
+.item:first-child { border-top: 0; }
+.item .d { text-align: center; font-size: .78rem; color: var(--muted); line-height: 1.3; }
+.item .d b { display: block; font-size: 1.05rem; color: var(--fg); }
+.item .t { min-width: 0; }
+.item .t div { overflow-wrap: anywhere; }
+.item .t small { color: var(--muted); }
+.amt { font-weight: 600; white-space: nowrap; }
+.amt.in { color: var(--in); }
+.amt.out { color: var(--out); }
+.del { min-height: 36px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--muted); font-size: .8rem; }
+.del.sure { background: var(--out-bg); color: var(--out); border-color: var(--out); }
+.empty { color: var(--muted); text-align: center; padding: 18px 8px; }
+.empty .ghost { margin-top: 12px; }
+
+.foot { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; color: var(--muted); font-size: .82rem; }
+.foot select { min-height: 36px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--fg); }
+.foot button { background: none; border: 0; color: var(--muted); text-decoration: underline; padding: 6px 0; font-size: .82rem; }
+.foot .exp { min-height: 40px; padding: 0 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--fg); text-decoration: none; font-weight: 600; }
+@media (prefers-reduced-motion: no-preference) { .meter i, .bar .track i { transition: width .3s ease; } }
+body { margin: 0; }
+html { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+</style>
+
+</head>
+<body>
+<div id="app" dir="rtl" lang="ar">
+  <main class="wrap">
+    <header class="top">
+      <h1>حساباتي</h1>
+      <nav class="months" aria-label="الشهر">
+        <button class="ghost" id="prev" type="button">السابق</button>
+        <span id="monthLabel" class="num"></span>
+        <button class="ghost" id="next" type="button">التالي</button>
+      </nav>
+    </header>
+
+    <section class="card summary" aria-live="polite">
+      <p class="label">الرصيد هذا الشهر</p>
+      <p class="balance num" id="balance"></p>
+      <div class="split">
+        <div class="in"><span>الدخل</span><b class="num" id="inc"></b></div>
+        <div class="out"><span>المصروفات</span><b class="num" id="exp"></b></div>
+      </div>
+      <div class="meter"><i id="meterFill"></i></div>
+      <p class="hint" id="meterText"></p>
+    </section>
+
+    <section class="card">
+      <h2>حركة جديدة</h2>
+      <form id="form" autocomplete="off">
+        <div class="seg full" role="radiogroup" aria-label="نوع الحركة">
+          <label><input type="radio" name="kind" value="expense" checked><span>مصروف</span></label>
+          <label><input type="radio" name="kind" value="income"><span>دخل</span></label>
+        </div>
+        <label class="field" for="amount">المبلغ
+          <input id="amount" inputmode="decimal" placeholder="0" required>
+        </label>
+        <label class="field" for="cat">التصنيف
+          <select id="cat"></select>
+        </label>
+        <label class="field" for="date">التاريخ
+          <input id="date" type="date" required>
+        </label>
+        <label class="field" for="note">ملاحظة (اختياري)
+          <input id="note" maxlength="80">
+        </label>
+        <button class="primary full" type="submit">إضافة</button>
+        <p class="err full" id="err" role="alert"></p>
+      </form>
+    </section>
+
+    <section class="card" id="breakdownCard" hidden>
+      <h2>أين ذهبت مصروفاتك</h2>
+      <div class="bars" id="bars"></div>
+    </section>
+
+    <section class="card">
+      <h2>حركات الشهر</h2>
+      <div class="list" id="list"></div>
+    </section>
+
+    <footer class="foot">
+      <span id="status"></span>
+      <span>
+        <label for="cur">العملة</label>
+        <select id="cur"></select>
+      </span>
+      <button type="button" class="exp" id="exportXlsx">تصدير إلى Excel</button>
+      <button type="button" id="clearSamples" hidden>حذف الأمثلة</button>
+    </footer>
+  </main>
+</div>
+
+<script>
+(function () {
+  document.documentElement.dir = 'rtl';
+  var $ = function (s) { return document.querySelector(s); };
+
+  var CATS = {
+    expense: ['طعام وشراب', 'سكن وفواتير', 'مواصلات', 'صحة', 'تعليم', 'ترفيه', 'تسوق', 'أخرى'],
+    income: ['راتب', 'عمل حر', 'هدية', 'أخرى']
+  };
+  var CURS = [['IQD', 'د.ع'], ['USD', '$'], ['SAR', 'ر.س'], ['AED', 'د.إ'], ['JOD', 'د.أ'], ['KWD', 'د.ك'], ['EGP', 'ج.م']];
+  var LSK = 'hisabati.items.v1', LSC = 'hisabati.cur.v1';
+
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function ymOf(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1); }
+  function todayStr() { var d = new Date(); return ymOf(d) + '-' + pad(d.getDate()); }
+  function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+
+  var st = { items: [], mode: 'loading', col: null, ym: ymOf(new Date()), cur: lsGet(LSC) || 'IQD', confirm: null };
+
+  function fmt(n) {
+    var sym = (CURS.filter(function (c) { return c[0] === st.cur; })[0] || CURS[0])[1];
+    var s = Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 2 });
+    return '⁦' + (n < 0 ? '−' : '') + s + '⁩ ' + sym;
+  }
+  function parseAmount(s) {
+    s = String(s || '').replace(/[٠-٩]/g, function (c) { return c.charCodeAt(0) - 0x660; })
+      .replace(/[۰-۹]/g, function (c) { return c.charCodeAt(0) - 0x6F0; })
+      .replace(/[,،\s]/g, '').replace(/٫/g, '.');
+    var n = parseFloat(s);
+    return isFinite(n) ? n : NaN;
+  }
+  function monthLabel(ym) {
+    var p = ym.split('-');
+    var d = new Date(+p[0], +p[1] - 1, 1);
+    try { return d.toLocaleDateString('ar-IQ-u-nu-latn', { month: 'long', year: 'numeric' }); }
+    catch (e) { return ym; }
+  }
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  /* ---------- storage ---------- */
+  function persistLocal() { lsSet(LSK, JSON.stringify(st.items)); }
+  function loadLocal() {
+    try { st.items = JSON.parse(lsGet(LSK) || '[]') || []; } catch (e) { st.items = []; }
+  }
+  async function addItem(rec) {
+    rec.created = Date.now();
+    if (st.mode === 'cloud') { await st.col.doc().set(rec); }
+    else {
+      rec.id = 'l' + rec.created + Math.random().toString(36).slice(2, 6);
+      st.items.push(rec); persistLocal(); render();
+    }
+  }
+  async function removeItem(id) {
+    if (st.mode === 'cloud') { await st.col.doc(id).delete(); }
+    else { st.items = st.items.filter(function (x) { return x.id !== id; }); persistLocal(); render(); }
+  }
+
+  /* ---------- render ---------- */
+  function monthItems() {
+    return st.items.filter(function (x) { return typeof x.date === 'string' && x.date.slice(0, 7) === st.ym && isFinite(x.amount); });
+  }
+  function render() {
+    $('#monthLabel').textContent = monthLabel(st.ym);
+    var items = monthItems();
+    var inc = 0, exp = 0, byCat = {};
+    items.forEach(function (x) {
+      if (x.kind === 'income') inc += x.amount;
+      else { exp += x.amount; byCat[x.cat] = (byCat[x.cat] || 0) + x.amount; }
+    });
+    var bal = inc - exp;
+    var b = $('#balance');
+    b.textContent = fmt(bal);
+    b.classList.toggle('neg', bal < 0);
+    $('#inc').textContent = fmt(inc);
+    $('#exp').textContent = fmt(exp);
+
+    var pct = inc > 0 ? Math.min(100, exp / inc * 100) : (exp > 0 ? 100 : 0);
+    var fill = $('#meterFill');
+    fill.style.width = pct + '%';
+    fill.classList.toggle('over', exp > inc);
+    $('#meterText').textContent =
+      inc === 0 && exp === 0 ? 'لا توجد حركات بعد في هذا الشهر.' :
+      inc === 0 ? 'صرفت هذا الشهر دون تسجيل دخل.' :
+      exp > inc ? 'صرفت أكثر من دخلك بمقدار ' + fmt(exp - inc) + '.' :
+      'صرفت ' + Math.round(exp / inc * 100) + '% من دخل هذا الشهر.';
+
+    // category breakdown
+    var cats = Object.keys(byCat).sort(function (a, c) { return byCat[c] - byCat[a]; });
+    $('#breakdownCard').hidden = cats.length === 0;
+    var bars = $('#bars'); bars.textContent = '';
+    cats.forEach(function (c) {
+      var bar = el('div', 'bar');
+      var row = el('div', 'row');
+      row.appendChild(el('span', null, c));
+      row.appendChild(el('span', 'num', fmt(byCat[c]) + ' · ' + Math.round(byCat[c] / exp * 100) + '%'));
+      var track = el('div', 'track'); var i = el('i');
+      i.style.width = (byCat[c] / byCat[cats[0]] * 100) + '%';
+      track.appendChild(i); bar.appendChild(row); bar.appendChild(track); bars.appendChild(bar);
+    });
+
+    // list
+    var list = $('#list'); list.textContent = '';
+    if (st.mode === 'loading') {
+      list.appendChild(el('p', 'empty', 'جارٍ تحميل بياناتك…'));
+    } else if (items.length === 0) {
+      var e = el('div', 'empty');
+      e.appendChild(el('p', null, 'لا توجد حركات في هذا الشهر. أضف أول حركة من النموذج أعلاه.'));
+      if (st.items.length === 0) {
+        var sb = el('button', 'ghost', 'جرّب بأمثلة جاهزة');
+        sb.type = 'button'; sb.addEventListener('click', addSamples);
+        e.appendChild(sb);
+      }
+      list.appendChild(e);
+    } else {
+      items.sort(function (a, c) { return a.date < c.date ? 1 : a.date > c.date ? -1 : (c.created || 0) - (a.created || 0); });
+      items.forEach(function (x) {
+        var r = el('div', 'item');
+        var d = el('div', 'd');
+        var dt = new Date(x.date + 'T00:00:00');
+        var wd = '';
+        try { wd = dt.toLocaleDateString('ar-IQ-u-nu-latn', { weekday: 'short' }); } catch (e2) {}
+        d.appendChild(el('b', 'num', String(dt.getDate())));
+        d.appendChild(document.createTextNode(wd));
+        var t = el('div', 't');
+        t.appendChild(el('div', null, x.note || x.cat));
+        if (x.note) t.appendChild(el('small', null, x.cat));
+        var inc2 = x.kind === 'income';
+        var a = el('span', 'amt num ' + (inc2 ? 'in' : 'out'), (inc2 ? '+ ' : '− ') + fmt(x.amount));
+        var del = el('button', 'del' + (st.confirm === x.id ? ' sure' : ''), st.confirm === x.id ? 'تأكيد الحذف' : 'حذف');
+        del.type = 'button';
+        del.addEventListener('click', function () { onDelete(x.id); });
+        r.appendChild(d); r.appendChild(t); r.appendChild(a); r.appendChild(del);
+        list.appendChild(r);
+      });
+    }
+
+    $('#status').textContent =
+      st.mode === 'cloud' ? 'تُحفظ بياناتك في حسابك، ولا يراها غيرك.' :
+      st.mode === 'local' ? 'تُحفظ بياناتك على هذا المتصفح فقط.' : '';
+    $('#clearSamples').hidden = !st.items.some(function (x) { return x.sample; });
+  }
+
+  var confirmTimer = null;
+  function onDelete(id) {
+    if (st.confirm === id) {
+      st.confirm = null; clearTimeout(confirmTimer);
+      removeItem(id).catch(function () { showErr('تعذّر الحذف. حاول مرة أخرى.'); });
+      render();
+      return;
+    }
+    st.confirm = id; render();
+    clearTimeout(confirmTimer);
+    confirmTimer = setTimeout(function () { st.confirm = null; render(); }, 3500);
+  }
+
+  function showErr(m) { $('#err').textContent = m || ''; }
+
+  /* ---------- samples ---------- */
+  var SAMPLES = [
+    ['income', 'راتب', 1200000, 'راتب الشهر', 1],
+    ['expense', 'سكن وفواتير', 350000, 'إيجار', 2],
+    ['expense', 'طعام وشراب', 85000, 'تسوق من السوق', 4],
+    ['expense', 'مواصلات', 30000, 'وقود', 6],
+    ['expense', 'طعام وشراب', 22000, 'مطعم', 9],
+    ['expense', 'صحة', 45000, 'صيدلية', 11],
+    ['income', 'عمل حر', 200000, 'عمل جانبي', 12]
+  ];
+  async function addSamples() {
+    try {
+      for (var i = 0; i < SAMPLES.length; i++) {
+        var s = SAMPLES[i];
+        await addItem({ kind: s[0], cat: s[1], amount: s[2], note: s[3], date: st.ym + '-' + pad(s[4]), sample: true });
+      }
+    } catch (e) { showErr('تعذّر الحفظ.'); }
+  }
+  async function clearSamples() {
+    var ids = st.items.filter(function (x) { return x.sample; }).map(function (x) { return x.id; });
+    try { for (var i = 0; i < ids.length; i++) await removeItem(ids[i]); } catch (e) { showErr('تعذّر الحذف.'); }
+  }
+
+  /* ---------- form ---------- */
+  function kind() { return document.querySelector('input[name="kind"]:checked').value; }
+  function fillCats() {
+    var sel = $('#cat'); sel.textContent = '';
+    CATS[kind()].forEach(function (c) { var o = el('option', null, c); o.value = c; sel.appendChild(o); });
+  }
+  document.querySelectorAll('input[name="kind"]').forEach(function (r) { r.addEventListener('change', fillCats); });
+
+  $('#form').addEventListener('submit', async function (ev) {
+    ev.preventDefault(); showErr('');
+    var amount = parseAmount($('#amount').value);
+    if (!(amount > 0)) { showErr('اكتب مبلغاً أكبر من صفر.'); $('#amount').focus(); return; }
+    var date = $('#date').value || todayStr();
+    var rec = { kind: kind(), cat: $('#cat').value, amount: amount, note: $('#note').value.trim(), date: date };
+    try {
+      await addItem(rec);
+      $('#amount').value = ''; $('#note').value = '';
+      st.ym = date.slice(0, 7); render();
+      $('#amount').focus();
+    } catch (e) { showErr('تعذّر الحفظ. تأكد من أن لديك صلاحية الكتابة في هذه الصفحة.'); }
+  });
+
+  function shiftMonth(n) {
+    var p = st.ym.split('-');
+    st.ym = ymOf(new Date(+p[0], +p[1] - 1 + n, 1));
+    render();
+  }
+  $('#prev').addEventListener('click', function () { shiftMonth(-1); });
+  $('#next').addEventListener('click', function () { shiftMonth(1); });
+  $('#clearSamples').addEventListener('click', clearSamples);
+
+  $('#exportXlsx').addEventListener('click', async function () {
+    showErr('');
+    var all = st.items.filter(function (x) { return typeof x.date === 'string' && isFinite(x.amount); });
+    if (!all.length) { showErr('لا توجد حركات لتصديرها.'); return; }
+    try {
+      var dl = window.claude && window.claude.use ? await window.claude.use('downloads') : null;
+      if (!window.XLSX) { showErr('التصدير غير متاح في هذا العرض.'); return; }
+      all.sort(function (a, c) { return a.date < c.date ? -1 : a.date > c.date ? 1 : (a.created || 0) - (c.created || 0); });
+      var rows = [['التاريخ', 'النوع', 'التصنيف', 'المبلغ', 'ملاحظة']];
+      var months = {};
+      all.forEach(function (x) {
+        rows.push([x.date, x.kind === 'income' ? 'دخل' : 'مصروف', x.cat, x.amount, x.note || '']);
+        var m = x.date.slice(0, 7);
+        months[m] = months[m] || [0, 0];
+        months[m][x.kind === 'income' ? 0 : 1] += x.amount;
+      });
+      var sum = [['الشهر', 'الدخل', 'المصروفات', 'الرصيد']];
+      Object.keys(months).sort().forEach(function (m) { sum.push([m, months[m][0], months[m][1], months[m][0] - months[m][1]]); });
+      var wb = XLSX.utils.book_new();
+      var ws1 = XLSX.utils.aoa_to_sheet(rows);
+      ws1['!cols'] = [{ wch: 12 }, { wch: 9 }, { wch: 16 }, { wch: 14 }, { wch: 30 }];
+      var ws2 = XLSX.utils.aoa_to_sheet(sum);
+      ws2['!cols'] = [{ wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
+      XLSX.utils.book_append_sheet(wb, ws1, 'الحركات');
+      XLSX.utils.book_append_sheet(wb, ws2, 'ملخص شهري');
+      wb.Workbook = { Views: [{ RTL: true }] };
+      var buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      var fname = 'hisabati-' + todayStr() + '.xlsx';
+      if (dl) { await dl.save({ filename: fname, data: buf }); }
+      else {
+        var blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        var u = URL.createObjectURL(blob);
+        var a = document.createElement('a'); a.href = u; a.download = fname;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(u); }, 4000);
+      }
+    } catch (e) {
+      if (!e || e.code !== 'declined') showErr('تعذّر التصدير. حاول مرة أخرى.');
+    }
+  });
+
+  var curSel = $('#cur');
+  CURS.forEach(function (c) { var o = el('option', null, c[1] + ' ' + c[0]); o.value = c[0]; curSel.appendChild(o); });
+  curSel.value = st.cur;
+  curSel.addEventListener('change', function () { st.cur = curSel.value; lsSet(LSC, st.cur); render(); });
+
+  /* ---------- start ---------- */
+  $('#date').value = todayStr();
+  fillCats();
+  render();
+
+  function goLocal() { st.mode = 'local'; loadLocal(); render(); }
+  (async function init() {
+    try {
+      var c = window.claude;
+      if (!c || !c.use) return goLocal();
+      var results = await Promise.all([c.use('user'), c.use('db')]);
+      var user = results[0], db = results[1];
+      var uid = user ? await user.id() : null;
+      if (!db || !uid) return goLocal();
+      st.col = db.collection('data/users/' + uid);
+      var timer = setTimeout(function () { if (st.mode === 'loading') { $('#status').textContent = 'يتعذّر الوصول إلى بياناتك الآن.'; } }, 10000);
+      st.col.onSnapshot(function (snap) {
+        clearTimeout(timer);
+        st.mode = 'cloud';
+        st.items = snap.docs.map(function (d) { var o = d.data() || {}; o.id = d.id; return o; });
+        render();
+      }, function () { clearTimeout(timer); goLocal(); });
+    } catch (e) { goLocal(); }
+  })();
+})();
+</script>
+<script>if ('serviceWorker' in navigator) { addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); }); }</script>
+</body>
+</html>
